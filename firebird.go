@@ -95,14 +95,27 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 	return map[string]clause.ClauseBuilder{
 		"INSERT": func(c clause.Clause, builder clause.Builder) {
+			insertClause, ok := c.Expression.(clause.Insert)
+			if !ok {
+				builder.WriteString("INSERT INTO ")
+				return
+			}
+
 			if stmt, ok := builder.(*gorm.Statement); ok {
-				// If GORM added a conflict clause, we switch to Firebird's Upsert syntax
 				if _, ok := stmt.Clauses["ON CONFLICT"]; ok {
 					builder.WriteString("UPDATE OR INSERT INTO ")
-					return
+				} else {
+					builder.WriteString("INSERT INTO ")
 				}
+
+				if insertClause.Table.Name != "" {
+					builder.WriteQuoted(insertClause.Table)
+				} else {
+					builder.WriteQuoted(stmt.Table)
+				}
+			} else {
+				builder.WriteString("INSERT INTO ")
 			}
-			builder.WriteString("INSERT INTO ")
 		},
 		"ON CONFLICT": func(c clause.Clause, builder clause.Builder) {
 			if onConflict, ok := c.Expression.(clause.OnConflict); ok {
