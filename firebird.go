@@ -3,6 +3,10 @@ package firebird
 import (
 	"database/sql"
 	"fmt"
+	"math"
+	"strconv"
+	"time"
+
 	_ "github.com/nakagami/firebirdsql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/callbacks"
@@ -10,9 +14,6 @@ import (
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
-	"math"
-	"strconv"
-	"time"
 )
 
 type Config struct {
@@ -57,7 +58,7 @@ func (dialector Dialector) Apply(config *gorm.Config) error {
 
 var (
 	// CreateClauses create clauses
-	CreateClauses = []string{"INSERT", "VALUES", ""}
+	CreateClauses = []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"}
 	// UpdateClauses update clauses
 	UpdateClauses = []string{"UPDATE", "SET", "WHERE", "ORDER BY", "LIMIT"}
 	// DeleteClauses delete clauses
@@ -93,6 +94,44 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 
 func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 	return map[string]clause.ClauseBuilder{
+		"INSERT": func(c clause.Clause, builder clause.Builder) {
+			if stmt, ok := builder.(*gorm.Statement); ok {
+				// If GORM added a conflict clause, we switch to Firebird's Upsert syntax
+				if _, ok := stmt.Clauses["ON CONFLICT"]; ok {
+					builder.WriteString("UPDATE OR INSERT INTO ")
+					return
+				}
+			}
+			builder.WriteString("INSERT INTO ")
+		},
+		"ON CONFLICT": func(c clause.Clause, builder clause.Builder) {
+			if onConflict, ok := c.Expression.(clause.OnConflict); ok {
+				builder.WriteString(" MATCHING (")
+				if len(onConflict.Columns) > 0 {
+					for idx, column := range onConflict.Columns {
+						if idx > 0 {
+							builder.WriteString(",")
+						}
+						builder.WriteQuoted(column.Name)
+					}
+				} else {
+					// Default to ID if no specific columns are provided
+					builder.WriteString("\"ID\"")
+				}
+				builder.WriteString(")")
+			}
+		},
+		"RETURNING": func(c clause.Clause, builder clause.Builder) {
+			if returning, ok := c.Expression.(clause.Returning); ok && len(returning.Columns) > 0 {
+				builder.WriteString(" RETURNING ")
+				for idx, column := range returning.Columns {
+					if idx > 0 {
+						builder.WriteString(",")
+					}
+					builder.WriteQuoted(column.Name)
+				}
+			}
+		},
 		"LIMIT": func(c clause.Clause, builder clause.Builder) {
 			if limit, ok := c.Expression.(clause.Limit); ok {
 				builder.WriteString("ROWS ")
