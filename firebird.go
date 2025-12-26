@@ -85,7 +85,7 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 			return err
 		}
 	}
-
+	db.Config.CreateBatchSize = 1
 	for k, v := range dialector.ClauseBuilders() {
 		db.ClauseBuilders[k] = v
 	}
